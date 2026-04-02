@@ -1,0 +1,69 @@
+:root {
+	color-scheme: dark;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	height: 200vh;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+	background: #fff;
+	color: #f1f1f1;
+}
+
+.layout {
+	width: 100%;
+	height: 100%;
+	position: relative;
+}
+
+#webgl-layer {
+	position: fixed;
+	left: 0;
+	top: 0;
+	width: 100%;
+	height: 100%;
+	pointer-events: none;
+	z-index: 1;
+}
+
+#webgl-layer canvas {
+	display: block;
+	width: 100%;
+	height: 100%;
+}
+
+.image1 {
+	position: absolute;
+	z-index: 0;
+	top: 9.92vw;
+	left: 13.227vw;
+	width: 33.07vw;
+	height: 22.05vw;
+	opacity: 0;
+}
+
+img {
+	width: 100%;
+	height: 100%;
+}
+.image2 {
+	position: absolute;
+	z-index: 0;
+	top: calc(100vh + 15vw);
+	left: 13.227vw;
+	width: 33.07vw;
+	height: 22.05vw;
+	opacity: 0;
+}
+
+@media (max-width: 560px) {
+	.image1 {
+		width: min(500px, 86vw);
+		margin-left: auto;
+		margin-right: auto;
+	}
+}
