@@ -1,9 +1,7 @@
 # vite-10syunen
 
-Vite + vanilla JavaScript + vanilla CSS + three.js + ammo.js で作ったミニゲームです。
-
-- 500px の箱の中に、180px 相当の小石を 10 個落とします。
-- 全小石が床に接して静止状態を一定時間維持するとクリアです。
+DOMで写真を2個たて並び、DOMはopacity:0にしてcanvasで描いてスクロールしてもDOMと同期するようにする
+DOMをマウスでクリックして動かせる（置く時もクリック）
 
 ## セットアップ
 
@@ -26,5 +24,7 @@ npm run build
 ## 操作
 
 - `リスタート` ボタンで小石の配置をリセットできます。
+
 # vite-10-syunen-demo
+
 # dommove-threejs
