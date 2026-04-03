@@ -59,11 +59,3 @@ img {
 	height: 22.05vw;
 	opacity: 0;
 }
-
-@media (max-width: 560px) {
-	.image1 {
-		width: min(500px, 86vw);
-		margin-left: auto;
-		margin-right: auto;
-	}
-}
