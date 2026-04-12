@@ -2,7 +2,6 @@ import "pathseg";
 import "./style.css";
 import * as THREE from "three";
 import { Engine, World, Bodies, Body, Svg, Common } from "matter-js";
-
 const MAX_DPR = 1.5;
 
 class ImageItem {
@@ -85,7 +84,7 @@ class ScrollSyncApp {
 		this.canvasHeight = 0;
 
 		this.render = this.render.bind(this);
-		this.onResize = this.onResize.bind(this);
+		this.onResize = this._debounce(this.onResize.bind(this), 200);
 
 		// 現在掴んでいる要素
 		this.dragging = null;
@@ -105,6 +104,15 @@ class ScrollSyncApp {
 		// Matter.jsの物理エンジンの初期化
 		this.engine = Engine.create();
 		this.engine.gravity.y = 1;
+
+		this._lastTime = 0;
+	}
+	_debounce(fn, ms) {
+		let timer;
+		return (...args) => {
+			clearTimeout(timer);
+			timer = setTimeout(() => fn(...args), ms);
+		};
 	}
 
 	async init() {
@@ -213,6 +221,7 @@ class ScrollSyncApp {
 		this.dragging = null;
 	}
 
+	// ...existing code...
 	setupPhysics() {
 		World.clear(this.engine.world, false);
 
@@ -243,10 +252,10 @@ class ScrollSyncApp {
 					}));
 
 					if (verts.length >= 3) {
-						const minX = Math.min(...verts.map((v) => v.x));
-						const maxX = Math.max(...verts.map((v) => v.x));
-						const minY = Math.min(...verts.map((v) => v.y));
-						const maxY = Math.max(...verts.map((v) => v.y));
+						const minX = verts.reduce((m, v) => Math.min(m, v.x), Infinity);
+						const maxX = verts.reduce((m, v) => Math.max(m, v.x), -Infinity);
+						const minY = verts.reduce((m, v) => Math.min(m, v.y), Infinity);
+						const maxY = verts.reduce((m, v) => Math.max(m, v.y), -Infinity);
 						const cx = (minX + maxX) / 2;
 						const cy = (minY + maxY) / 2;
 
@@ -278,6 +287,7 @@ class ScrollSyncApp {
 			Bodies.rectangle(vw + t / 2, vh / 2, t, vh + t * 2, { isStatic: true }),
 		]);
 	}
+	// ...existing code...
 
 	onResize() {
 		this.viewportWidth = window.innerWidth;
@@ -307,9 +317,10 @@ class ScrollSyncApp {
 		item.domImage.style.transform = `translate(${dx}px, ${dy}px) rotate(${item.body.angle}rad)`;
 	}
 
-	render() {
-		// 物理エンジンを更新
-		Engine.update(this.engine, 1000 / 60);
+	render(now = 0) {
+		const delta = Math.min(now - this._lastTime, 32);
+		this._lastTime = now;
+		Engine.update(this.engine, delta);
 
 		this.items.forEach((item) => {
 			item.sync(this.viewportWidth, this.canvasHeight);
@@ -317,7 +328,7 @@ class ScrollSyncApp {
 		});
 
 		this.renderer.render(this.scene, this.camera);
-		requestAnimationFrame(this.render);
+		requestAnimationFrame((t) => this.render(t));
 	}
 }
 
