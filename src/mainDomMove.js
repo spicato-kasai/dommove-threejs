@@ -1,5 +1,7 @@
+import "pathseg";
 import "./style.css";
 import * as THREE from "three";
+import { Engine, World, Bodies, Body, Svg, Common } from "matter-js";
 
 const MAX_DPR = 1.5;
 
@@ -9,6 +11,7 @@ class ImageItem {
 		this.mesh = null;
 		this.scene = scene;
 		this.textureLoader = textureLoader;
+		this.body = null;
 	}
 
 	async load() {
@@ -42,15 +45,20 @@ class ImageItem {
 	sync(viewportWidth, canvasHeight) {
 		if (!this.mesh) return;
 
-		// getBoundingClientRectで要素の寸法と、そのビューポートに対する相対位置に関する情報を DOMRect オブジェクトで返します。
 		const rect = this.domImage.getBoundingClientRect();
-		const w = rect.width;
-		const h = rect.height;
 
-		// 大きさを渡す
+		// 物理演算中は初期サイズを固定（回転時の外接矩形変化を無視）
+		const w = this.body ? this.baseW : rect.width;
+		const h = this.body ? this.baseH : rect.height;
+
 		this.mesh.scale.set(w, h, 1);
 
-		// 位置を渡す
+		if (this.body) {
+			this.mesh.position.set(this.body.position.x - viewportWidth / 2, canvasHeight / 2 - this.body.position.y, 0);
+			this.mesh.rotation.z = -this.body.angle;
+			return;
+		}
+
 		const centerX = rect.left + w / 2 - viewportWidth / 2;
 		const centerY = canvasHeight / 2 - (rect.top + h / 2);
 		this.mesh.position.set(centerX, centerY, 0);
@@ -93,6 +101,10 @@ class ScrollSyncApp {
 		this.onTouchStart = this.onTouchStart.bind(this);
 		this.onTouchMove = this.onTouchMove.bind(this);
 		this.onTouchEnd = this.onTouchEnd.bind(this);
+
+		// Matter.jsの物理エンジンの初期化
+		this.engine = Engine.create();
+		this.engine.gravity.y = 1;
 	}
 
 	async init() {
@@ -142,6 +154,19 @@ class ScrollSyncApp {
 
 		const dx = e.clientX - this.startX;
 		const dy = e.clientY - this.startY;
+
+		const item = this.items.find(({ domImage }) => domImage === this.dragging);
+		if (item?.body) {
+			const tx = this.baseX + dx;
+			const ty = this.baseY + dy;
+			Body.setPosition(item.body, {
+				x: item.baseCenterX + tx,
+				y: item.baseCenterY + ty,
+			});
+			Body.setVelocity(item.body, { x: 0, y: 0 });
+			return;
+		}
+
 		this.dragging.style.transform = `translate(${this.baseX + dx}px, ${this.baseY + dy}px)`;
 	}
 
@@ -152,6 +177,19 @@ class ScrollSyncApp {
 		const touch = e.touches[0];
 		const dx = touch.clientX - this.startX;
 		const dy = touch.clientY - this.startY;
+
+		const item = this.items.find(({ domImage }) => domImage === this.dragging);
+		if (item?.body) {
+			const tx = this.baseX + dx;
+			const ty = this.baseY + dy;
+			Body.setPosition(item.body, {
+				x: item.baseCenterX + tx,
+				y: item.baseCenterY + ty,
+			});
+			Body.setVelocity(item.body, { x: 0, y: 0 });
+			return;
+		}
+
 		this.dragging.style.transform = `translate(${this.baseX + dx}px, ${this.baseY + dy}px)`;
 	}
 
@@ -175,6 +213,72 @@ class ScrollSyncApp {
 		this.dragging = null;
 	}
 
+	setupPhysics() {
+		World.clear(this.engine.world, false);
+
+		this.items.forEach((item) => {
+			const rect = item.domImage.getBoundingClientRect();
+			const w = Math.max(1, rect.width);
+			const h = Math.max(1, rect.height);
+			const x = rect.left + w / 2;
+			const y = rect.top + h / 2;
+
+			item.baseW = w;
+			item.baseH = h;
+			item.baseCenterX = x;
+			item.baseCenterY = y;
+			item.body = null;
+
+			if (item.domImage.classList.contains("svg-image1-item")) {
+				const path = item.domImage.querySelector("path");
+				const vb = item.domImage.viewBox?.baseVal;
+
+				if (path && vb && vb.width > 0 && vb.height > 0) {
+					const sx = w / vb.width;
+					const sy = h / vb.height;
+
+					const verts = Svg.pathToVertices(path, 6).map((v) => ({
+						x: v.x * sx,
+						y: v.y * sy,
+					}));
+
+					if (verts.length >= 3) {
+						const minX = Math.min(...verts.map((v) => v.x));
+						const maxX = Math.max(...verts.map((v) => v.x));
+						const minY = Math.min(...verts.map((v) => v.y));
+						const maxY = Math.max(...verts.map((v) => v.y));
+						const cx = (minX + maxX) / 2;
+						const cy = (minY + maxY) / 2;
+
+						const localVerts = verts.map((v) => ({ x: v.x - cx, y: v.y - cy }));
+
+						item.body = Bodies.fromVertices(x, y, [localVerts], { restitution: 0.8, friction: 0.1, frictionAir: 0.01 }, true);
+					}
+				}
+			}
+
+			if (!item.body) {
+				item.body = Bodies.rectangle(x, y, w, h, {
+					restitution: 0.8,
+					friction: 0.1,
+					frictionAir: 0.01,
+				});
+			}
+
+			World.add(this.engine.world, item.body);
+		});
+
+		const t = 120;
+		const vw = this.viewportWidth;
+		const vh = this.canvasHeight;
+		World.add(this.engine.world, [
+			Bodies.rectangle(vw / 2, -t / 2, vw + t * 2, t, { isStatic: true }),
+			Bodies.rectangle(vw / 2, vh + t / 2, vw + t * 2, t, { isStatic: true }),
+			Bodies.rectangle(-t / 2, vh / 2, t, vh + t * 2, { isStatic: true }),
+			Bodies.rectangle(vw + t / 2, vh / 2, t, vh + t * 2, { isStatic: true }),
+		]);
+	}
+
 	onResize() {
 		this.viewportWidth = window.innerWidth;
 		this.viewportHeight = window.innerHeight;
@@ -192,10 +296,26 @@ class ScrollSyncApp {
 		this.camera.near = -1000;
 		this.camera.far = 1000;
 		this.camera.updateProjectionMatrix();
+		// 物理エンジンの設定を更新
+		this.setupPhysics();
+	}
+
+	syncDomFromBody(item) {
+		if (!item.body) return;
+		const dx = item.body.position.x - item.baseCenterX;
+		const dy = item.body.position.y - item.baseCenterY;
+		item.domImage.style.transform = `translate(${dx}px, ${dy}px) rotate(${item.body.angle}rad)`;
 	}
 
 	render() {
-		this.items.forEach((item) => item.sync(this.viewportWidth, this.canvasHeight));
+		// 物理エンジンを更新
+		Engine.update(this.engine, 1000 / 60);
+
+		this.items.forEach((item) => {
+			item.sync(this.viewportWidth, this.canvasHeight);
+			this.syncDomFromBody(item);
+		});
+
 		this.renderer.render(this.scene, this.camera);
 		requestAnimationFrame(this.render);
 	}

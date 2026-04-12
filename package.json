@@ -10,6 +10,9 @@
 	},
 	"dependencies": {
 		"ammo.js": "^0.0.10",
+		"matter-js": "^0.20.0",
+		"pathseg": "^1.2.1",
+		"poly-decomp": "^0.3.0",
 		"three": "^0.180.0"
 	},
 	"devDependencies": {
