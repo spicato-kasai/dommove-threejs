@@ -8,7 +8,7 @@
 
 body {
 	margin: 0;
-	height: 200vh;
+	height: 100vh;
 	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 	background: #fff;
 	color: #f1f1f1;
@@ -53,9 +53,18 @@ img {
 .image2 {
 	position: absolute;
 	z-index: 0;
-	top: calc(100vh + 15vw);
+	top: calc(50vh + 15vw);
 	left: 13.227vw;
 	width: 33.07vw;
 	height: 22.05vw;
 	opacity: 0;
+}
+.svg-image1 {
+	position: absolute;
+	z-index: 0;
+	top: 29.92vw;
+	left: 13.227vw;
+	width: 33.07vw;
+	height: 22.05vw;
+	/* opacity: 0; */
 }

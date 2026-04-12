@@ -12,10 +12,24 @@ class ImageItem {
 	}
 
 	async load() {
-		// 画像をテクスチャとして読み込む
-		const texture = await new Promise((resolve, reject) => {
-			this.textureLoader.load(this.domImage.currentSrc || this.domImage.src, resolve, undefined, reject);
-		});
+		let texture;
+		if (this.domImage.classList.contains("svg-image1-item")) {
+			const svgText = new XMLSerializer().serializeToString(this.domImage);
+			const svgBlob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
+			const svgUrl = URL.createObjectURL(svgBlob);
+
+			try {
+				texture = await new Promise((resolve, reject) => {
+					this.textureLoader.load(svgUrl, resolve, undefined, reject);
+				});
+			} finally {
+				URL.revokeObjectURL(svgUrl);
+			}
+		} else {
+			texture = await new Promise((resolve, reject) => {
+				this.textureLoader.load(this.domImage.currentSrc || this.domImage.src, resolve, undefined, reject);
+			});
+		}
 		texture.colorSpace = THREE.SRGBColorSpace;
 
 		// ライティングを考慮しないマテリアル
@@ -99,7 +113,7 @@ class ScrollSyncApp {
 		this.render();
 	}
 	onMouseDown(e) {
-		const clicked = this.items.find(({ domImage }) => domImage === e.target);
+		const clicked = this.items.find(({ domImage }) => domImage === e.target || domImage.contains(e.target));
 		if (!clicked) return;
 
 		e.preventDefault(); // ドラッグ中のテキスト選択などを防止
@@ -143,9 +157,8 @@ class ScrollSyncApp {
 
 	onTouchStart(e) {
 		const touch = e.touches[0];
-		// タッチした座標にある要素を取得
 		const target = document.elementFromPoint(touch.clientX, touch.clientY);
-		const clicked = this.items.find(({ domImage }) => domImage === target);
+		const clicked = this.items.find(({ domImage }) => domImage === target || domImage.contains(target));
 		if (!clicked) return;
 
 		e.preventDefault(); // スクロールを抑制
@@ -192,9 +205,11 @@ window.addEventListener("DOMContentLoaded", async () => {
 	const layer = document.querySelector("#webgl-layer");
 	const image1 = document.querySelector("#image1 img");
 	const image2 = document.querySelector("#image2 img");
+	const svg1 = document.querySelector(".svg-image1-item");
 	const domImages = [];
 	if (image1) domImages.push(image1);
 	if (image2) domImages.push(image2);
+	if (svg1) domImages.push(svg1);
 
 	if (!layer || domImages.length === 0) return;
 
