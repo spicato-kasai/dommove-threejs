@@ -1,8 +1,17 @@
-import "pathseg";
 import "./style.css";
 import * as THREE from "three";
-import { Engine, World, Bodies, Body, Svg, Common } from "matter-js";
+import { Engine, World, Bodies, Body } from "matter-js";
 const MAX_DPR = 1.5;
+
+function pathToVertices(pathEl, sampleLength = 10) {
+	const total = pathEl.getTotalLength();
+	const verts = [];
+	for (let i = 0; i <= total; i += sampleLength) {
+		const pt = pathEl.getPointAtLength(i);
+		verts.push({ x: pt.x, y: pt.y });
+	}
+	return verts;
+}
 
 class ImageItem {
 	constructor(domImage, scene, textureLoader) {
@@ -246,7 +255,7 @@ class ScrollSyncApp {
 					const sx = w / vb.width;
 					const sy = h / vb.height;
 
-					const verts = Svg.pathToVertices(path, 6).map((v) => ({
+					const verts = pathToVertices(path, 6).map((v) => ({
 						x: v.x * sx,
 						y: v.y * sy,
 					}));
