@@ -1,43 +1,12 @@
 import "./style.css";
 import * as THREE from "three";
-import { Engine, World, Bodies, Body, Common } from "matter-js";
-import decomp from "poly-decomp";
+import { Engine, World, Bodies, Body } from "matter-js";
 const MAX_DPR = 1.5;
-const FIXED_STEP = 1000 / 60; // 16.67ms
 
-// 画像
-import photoUrl from "./calender_image.jpg";
-
-// JPGをbase64に変換するユーティリティ
-async function toBase64(url) {
-	const res = await fetch(url);
-	const blob = await res.blob();
-	return new Promise((resolve) => {
-		const reader = new FileReader();
-		reader.onload = () => resolve(reader.result); // "data:image/jpeg;base64,..."
-		reader.readAsDataURL(blob);
-	});
-}
-
-/**
- * Converts an SVG path into a polyline-like array of sampled vertex points.
- *
- * The path is sampled from `0` to `getTotalLength()` using a computed interval:
- * `max(minStep, totalLength / maxPoints)`, ensuring no more than roughly
- * `maxPoints` samples while respecting a minimum spacing.
- *
- * @param {SVGPathElement} pathEl - The SVG `<path>` element to sample.
- * @param {number} [minStep=6] - Minimum distance (in path-length units/pixels) between sampled points.
- * @param {number} [maxPoints=60] - Target upper bound for the number of sampled points.
- * @returns {{x: number, y: number}[]} An ordered list of sampled coordinates along the path.
- */
-
-// SVGのパスを等間隔でサンプリングして頂点の配列を生成する関数
-function pathToVertices(pathEl, minStep = 6, maxPoints = 60) {
+function pathToVertices(pathEl, sampleLength = 10) {
 	const total = pathEl.getTotalLength();
-	const step = Math.max(minStep, total / maxPoints);
 	const verts = [];
-	for (let i = 0; i <= total; i += step) {
+	for (let i = 0; i <= total; i += sampleLength) {
 		const pt = pathEl.getPointAtLength(i);
 		verts.push({ x: pt.x, y: pt.y });
 	}
@@ -51,62 +20,11 @@ class ImageItem {
 		this.scene = scene;
 		this.textureLoader = textureLoader;
 		this.body = null;
-		this.isSvg = domImage instanceof SVGSVGElement || domImage.namespaceURI === "http://www.w3.org/2000/svg";
-
-		this.physicsPath = this.isSvg ? domImage.querySelector("[data-physics='1'], path") : null;
 	}
 
-	// ...existing code...
 	async load() {
 		let texture;
-		const isTargetSvg = this.isSvg && this.domImage.classList.contains("svg-image1-item");
-
-		if (isTargetSvg) {
-			// ★ ここを追加：先にbase64に変換する
-			const base64Url = await toBase64(photoUrl);
-
-			const svgClone = this.domImage.cloneNode(true);
-			const svgNS = "http://www.w3.org/2000/svg";
-
-			const vb = svgClone.viewBox?.baseVal;
-			const svgW = vb && vb.width ? vb.width : svgClone.width?.baseVal?.value || this.domImage.clientWidth;
-			const svgH = vb && vb.height ? vb.height : svgClone.height?.baseVal?.value || this.domImage.clientHeight;
-
-			const defs = document.createElementNS(svgNS, "defs");
-			const pattern = document.createElementNS(svgNS, "pattern");
-			pattern.setAttribute("id", "photoPattern");
-			pattern.setAttribute("patternUnits", "userSpaceOnUse");
-			pattern.setAttribute("width", String(svgW));
-			pattern.setAttribute("height", String(svgH));
-
-			const image = document.createElementNS(svgNS, "image");
-			// ★ photoUrl → base64Url に変更
-			image.setAttribute("href", base64Url);
-			image.setAttribute("x", "0");
-			image.setAttribute("y", "0");
-			image.setAttribute("width", String(svgW));
-			image.setAttribute("height", String(svgH));
-			image.setAttribute("preserveAspectRatio", "xMidYMid meet");
-
-			pattern.appendChild(image);
-			defs.appendChild(pattern);
-			svgClone.insertBefore(defs, svgClone.firstChild);
-
-			const path = svgClone.querySelector("path");
-			if (path) path.setAttribute("fill", "url(#photoPattern)");
-
-			const svgText = new XMLSerializer().serializeToString(svgClone);
-			const svgBlob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
-			const svgUrl = URL.createObjectURL(svgBlob);
-
-			try {
-				texture = await new Promise((resolve, reject) => {
-					this.textureLoader.load(svgUrl, resolve, undefined, reject);
-				});
-			} finally {
-				URL.revokeObjectURL(svgUrl);
-			}
-		} else if (this.isSvg) {
+		if (this.domImage.classList.contains("svg-image1-item")) {
 			const svgText = new XMLSerializer().serializeToString(this.domImage);
 			const svgBlob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
 			const svgUrl = URL.createObjectURL(svgBlob);
@@ -123,19 +41,18 @@ class ImageItem {
 				this.textureLoader.load(this.domImage.currentSrc || this.domImage.src, resolve, undefined, reject);
 			});
 		}
-
 		texture.colorSpace = THREE.SRGBColorSpace;
 
+		// ライティングを考慮しないマテリアル
 		const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
 		const geometry = new THREE.PlaneGeometry(1, 1);
 		this.mesh = new THREE.Mesh(geometry, material);
 		this.scene.add(this.mesh);
 	}
-	// ...existing code...
 
 	sync(viewportWidth, canvasHeight) {
 		if (!this.mesh) return;
-		// DOMのサイズと位置を取得
+
 		const rect = this.domImage.getBoundingClientRect();
 
 		// 物理演算中は初期サイズを固定（回転時の外接矩形変化を無視）
@@ -161,7 +78,7 @@ class ScrollSyncApp {
 		this.layer = layer;
 
 		this.scene = new THREE.Scene();
-		// 平行投影を表現できるカメラです。
+		// 平行投影を表現できるカメラです。このカメラには遠近感がないので、手前にある3Dオブジェクトも奥にある3Dオブジェクトも同じ大きさで表示されます。
 		this.camera = new THREE.OrthographicCamera();
 		this.renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
 		this.renderer.setClearColor(0x000000, 0);
@@ -195,7 +112,6 @@ class ScrollSyncApp {
 
 		// Matter.jsの物理エンジンの初期化
 		this.engine = Engine.create();
-		Common.setDecomp(decomp);
 		this.engine.gravity.y = 1;
 
 		this._lastTime = 0;
@@ -314,6 +230,7 @@ class ScrollSyncApp {
 		this.dragging = null;
 	}
 
+	// ...existing code...
 	setupPhysics() {
 		World.clear(this.engine.world, false);
 
@@ -330,35 +247,37 @@ class ScrollSyncApp {
 			item.baseCenterY = y;
 			item.body = null;
 
-			if (item.isSvg) {
-				const path = item.physicsPath;
+			if (item.domImage.classList.contains("svg-image1-item")) {
+				const path = item.domImage.querySelector("path");
 				const vb = item.domImage.viewBox?.baseVal;
 
 				if (path && vb && vb.width > 0 && vb.height > 0) {
 					const sx = w / vb.width;
 					const sy = h / vb.height;
-					// SVGをポリゴン化（点の集合体）して物理演算用の頂点列を生成
-					const rawVerts = pathToVertices(path, 6, 80);
-					const verts = rawVerts.map((v) => ({
-						x: (v.x - vb.x) * sx,
-						y: (v.y - vb.y) * sy,
+
+					const verts = pathToVertices(path, 6).map((v) => ({
+						x: v.x * sx,
+						y: v.y * sy,
 					}));
-					// 頂点数が少なすぎると物理演算が不安定になるため、ある程度の数が必要
-					if (verts.length >= 3 && verts.length <= 80) {
-						const b = path.getBBox();
-						const cx = (b.x - vb.x + b.width / 2) * sx;
-						const cy = (b.y - vb.y + b.height / 2) * sy;
+
+					if (verts.length >= 3) {
+						const minX = verts.reduce((m, v) => Math.min(m, v.x), Infinity);
+						const maxX = verts.reduce((m, v) => Math.max(m, v.x), -Infinity);
+						const minY = verts.reduce((m, v) => Math.min(m, v.y), Infinity);
+						const maxY = verts.reduce((m, v) => Math.max(m, v.y), -Infinity);
+						const cx = (minX + maxX) / 2;
+						const cy = (minY + maxY) / 2;
 
 						const localVerts = verts.map((v) => ({ x: v.x - cx, y: v.y - cy }));
 
-						item.body = Bodies.fromVertices(x + (cx - w / 2), y + (cy - h / 2), [localVerts], { restitution: 0.5, friction: 0.1, frictionAir: 0.01 }, true);
+						item.body = Bodies.fromVertices(x, y, [localVerts], { restitution: 0.8, friction: 0.1, frictionAir: 0.01 }, true);
 					}
 				}
 			}
 
 			if (!item.body) {
 				item.body = Bodies.rectangle(x, y, w, h, {
-					restitution: 0.5,
+					restitution: 0.8,
 					friction: 0.1,
 					frictionAir: 0.01,
 				});
@@ -377,6 +296,7 @@ class ScrollSyncApp {
 			Bodies.rectangle(vw + t / 2, vh / 2, t, vh + t * 2, { isStatic: true }),
 		]);
 	}
+	// ...existing code...
 
 	onResize() {
 		this.viewportWidth = window.innerWidth;
@@ -407,15 +327,9 @@ class ScrollSyncApp {
 	}
 
 	render(now = 0) {
-		const delta = Math.min(now - this._lastTime, 64); // 最大2フレーム分
+		const delta = Math.min(now - this._lastTime, 32);
 		this._lastTime = now;
-
-		// 余剰時間を積み立て、固定ステップ単位で消化する
-		this._accumulator = (this._accumulator || 0) + delta;
-		while (this._accumulator >= FIXED_STEP) {
-			Engine.update(this.engine, FIXED_STEP);
-			this._accumulator -= FIXED_STEP;
-		}
+		Engine.update(this.engine, delta);
 
 		this.items.forEach((item) => {
 			item.sync(this.viewportWidth, this.canvasHeight);
