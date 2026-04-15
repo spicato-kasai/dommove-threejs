@@ -9,6 +9,8 @@
 		"preview": "vite preview"
 	},
 	"dependencies": {
+		"@fred3d/ammo": "^1.0.0",
+		"ammo": "^3.0.3",
 		"ammo.js": "^0.0.10",
 		"matter-js": "^0.20.0",
 		"pathseg": "^1.2.1",

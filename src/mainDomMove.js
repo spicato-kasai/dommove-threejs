@@ -1,7 +1,19 @@
 import "./style.css";
 import * as THREE from "three";
+import photoUrl from "./calender_image.jpg";
 
 const MAX_DPR = 1.5;
+
+// JPGをbase64に変換するユーティリティ
+async function toBase64(url) {
+	const res = await fetch(url);
+	const blob = await res.blob();
+	return new Promise((resolve) => {
+		const reader = new FileReader();
+		reader.onload = () => resolve(reader.result);
+		reader.readAsDataURL(blob);
+	});
+}
 
 class ImageItem {
 	constructor(domImage, scene, textureLoader) {
@@ -9,13 +21,76 @@ class ImageItem {
 		this.mesh = null;
 		this.scene = scene;
 		this.textureLoader = textureLoader;
+		this.isSvg = domImage instanceof SVGSVGElement || domImage.namespaceURI === "http://www.w3.org/2000/svg";
 	}
 
 	async load() {
-		// 画像をテクスチャとして読み込む
-		const texture = await new Promise((resolve, reject) => {
-			this.textureLoader.load(this.domImage.currentSrc || this.domImage.src, resolve, undefined, reject);
-		});
+		let texture;
+		const isTargetSvg = this.isSvg && this.domImage.classList.contains("svg-image1-item");
+
+		if (isTargetSvg) {
+			// 写真をbase64に変換してSVGのpatternとして埋め込む
+			const base64Url = await toBase64(photoUrl);
+
+			const svgClone = this.domImage.cloneNode(true);
+			const svgNS = "http://www.w3.org/2000/svg";
+
+			const vb = svgClone.viewBox?.baseVal;
+			const svgW = vb && vb.width ? vb.width : svgClone.width?.baseVal?.value || this.domImage.clientWidth;
+			const svgH = vb && vb.height ? vb.height : svgClone.height?.baseVal?.value || this.domImage.clientHeight;
+
+			const defs = document.createElementNS(svgNS, "defs");
+			const pattern = document.createElementNS(svgNS, "pattern");
+			pattern.setAttribute("id", "photoPattern");
+			pattern.setAttribute("patternUnits", "userSpaceOnUse");
+			pattern.setAttribute("width", String(svgW));
+			pattern.setAttribute("height", String(svgH));
+
+			const image = document.createElementNS(svgNS, "image");
+			image.setAttribute("href", base64Url);
+			image.setAttribute("x", "0");
+			image.setAttribute("y", "0");
+			image.setAttribute("width", String(svgW));
+			image.setAttribute("height", String(svgH));
+			image.setAttribute("preserveAspectRatio", "xMidYMid meet");
+
+			pattern.appendChild(image);
+			defs.appendChild(pattern);
+			svgClone.insertBefore(defs, svgClone.firstChild);
+
+			const path = svgClone.querySelector("path");
+			if (path) path.setAttribute("fill", "url(#photoPattern)");
+
+			const svgText = new XMLSerializer().serializeToString(svgClone);
+			const svgBlob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
+			const svgUrl = URL.createObjectURL(svgBlob);
+
+			try {
+				texture = await new Promise((resolve, reject) => {
+					this.textureLoader.load(svgUrl, resolve, undefined, reject);
+				});
+			} finally {
+				URL.revokeObjectURL(svgUrl);
+			}
+		} else if (this.isSvg) {
+			// 通常SVG（写真なし）
+			const svgText = new XMLSerializer().serializeToString(this.domImage);
+			const svgBlob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
+			const svgUrl = URL.createObjectURL(svgBlob);
+
+			try {
+				texture = await new Promise((resolve, reject) => {
+					this.textureLoader.load(svgUrl, resolve, undefined, reject);
+				});
+			} finally {
+				URL.revokeObjectURL(svgUrl);
+			}
+		} else {
+			texture = await new Promise((resolve, reject) => {
+				this.textureLoader.load(this.domImage.currentSrc || this.domImage.src, resolve, undefined, reject);
+			});
+		}
+
 		texture.colorSpace = THREE.SRGBColorSpace;
 
 		// ライティングを考慮しないマテリアル
@@ -28,18 +103,23 @@ class ImageItem {
 	sync(viewportWidth, canvasHeight) {
 		if (!this.mesh) return;
 
-		// getBoundingClientRectで要素の寸法と、そのビューポートに対する相対位置に関する情報を DOMRect オブジェクトで返します。
 		const rect = this.domImage.getBoundingClientRect();
-		const w = rect.width;
-		const h = rect.height;
 
-		// 大きさを渡す
+		// getBoundingClientRectは回転後のAABBを返すので
+		// 回転なしの本来のサイズはclientWidth/clientHeightから取る
+		const w = this.domImage.clientWidth;
+		const h = this.domImage.clientHeight;
+
 		this.mesh.scale.set(w, h, 1);
 
-		// 位置を渡す
-		const centerX = rect.left + w / 2 - viewportWidth / 2;
-		const centerY = canvasHeight / 2 - (rect.top + h / 2);
+		// rectの中心はAABBの中心 = 回転後も正しい中心座標
+		const centerX = rect.left + rect.width / 2 - viewportWidth / 2;
+		const centerY = canvasHeight / 2 - (rect.top + rect.height / 2);
 		this.mesh.position.set(centerX, centerY, 0);
+
+		// DOMのtransformから回転角度を取り出す
+		const matrix = new DOMMatrix(window.getComputedStyle(this.domImage).transform);
+		this.mesh.rotation.z = Math.atan2(matrix.m21, matrix.m11);
 	}
 }
 
@@ -84,6 +164,9 @@ class ScrollSyncApp {
 		this.onTouchStart = this.onTouchStart.bind(this);
 		this.onTouchMove = this.onTouchMove.bind(this);
 		this.onTouchEnd = this.onTouchEnd.bind(this);
+
+		// 角度管理
+		this.rotationMap = new WeakMap();
 	}
 
 	async init() {
@@ -98,42 +181,45 @@ class ScrollSyncApp {
 		// 各画像にクリック可能スタイル
 		this.items.forEach(({ domImage }) => {
 			domImage.style.cursor = "pointer";
+			this.rotationMap.set(domImage, 0); // 初期角度は0度
 		});
-		this.createBoundaries();
+
 		this.onResize();
 		this.render();
 	}
 	onMouseDown(e) {
-		const clicked = this.items.find(({ domImage }) => domImage === e.target);
+		const clicked = this.items.find(({ domImage }) => domImage === e.target || domImage.contains(e.target));
 		if (!clicked) return;
-
-		e.preventDefault(); // ドラッグ中のテキスト選択などを防止
-
-		// ドラッグ開始時のマウス座標を記録
+		e.preventDefault();
 		this.startX = e.clientX;
 		this.startY = e.clientY;
-
-		// 現在のtransform値を取得（累積移動量を保持するため）
+		this._hasMoved = false; // ← 追加
 		const matrix = new DOMMatrix(window.getComputedStyle(clicked.domImage).transform);
 		this.baseX = matrix.m41;
 		this.baseY = matrix.m42;
-
 		this.dragging = clicked.domImage;
 		this.dragging.style.cursor = "grabbing";
 	}
 
 	onMouseUp() {
 		if (!this.dragging) return;
+		if (!this._hasMoved) {
+			const rot = ((this.rotationMap.get(this.dragging) ?? 0) + 45) % 360; // クリックだけで45度回転させる。360度まわれば0度に戻る。
+			this.rotationMap.set(this.dragging, rot);
+			this.dragging.style.transform = `translate(${this.baseX}px, ${this.baseY}px) rotate(${rot}deg)`;
+		}
 		this.dragging.style.cursor = "pointer";
 		this.dragging = null;
 	}
 
 	onMouseMove(e) {
 		if (!this.dragging) return;
-
 		const dx = e.clientX - this.startX;
 		const dy = e.clientY - this.startY;
-		this.dragging.style.transform = `translate(${this.baseX + dx}px, ${this.baseY + dy}px)`;
+		if (Math.abs(dx) > 3 || Math.abs(dy) > 3) this._hasMoved = true;
+		if (!this._hasMoved) return;
+		const rot = this.rotationMap.get(this.dragging) ?? 0;
+		this.dragging.style.transform = `translate(${this.baseX + dx}px, ${this.baseY + dy}px) rotate(${rot}deg)`;
 	}
 
 	onTouchMove(e) {
@@ -143,14 +229,17 @@ class ScrollSyncApp {
 		const touch = e.touches[0];
 		const dx = touch.clientX - this.startX;
 		const dy = touch.clientY - this.startY;
-		this.dragging.style.transform = `translate(${this.baseX + dx}px, ${this.baseY + dy}px)`;
+		if (Math.abs(dx) > 3 || Math.abs(dy) > 3) this._hasMoved = true;
+		if (!this._hasMoved) return; // ← 追加
+		const rot = this.rotationMap.get(this.dragging) ?? 0; // ← 追加
+		this.dragging.style.transform = `translate(${this.baseX + dx}px, ${this.baseY + dy}px) rotate(${rot}deg)`;
 	}
 
 	onTouchStart(e) {
 		const touch = e.touches[0];
 		// タッチした座標にある要素を取得
 		const target = document.elementFromPoint(touch.clientX, touch.clientY);
-		const clicked = this.items.find(({ domImage }) => domImage === target);
+		const clicked = this.items.find(({ domImage }) => domImage === target || domImage.contains(target));
 		if (!clicked) return;
 
 		e.preventDefault(); // スクロールを抑制
@@ -161,9 +250,17 @@ class ScrollSyncApp {
 		this.startX = touch.clientX;
 		this.startY = touch.clientY;
 		this.dragging = clicked.domImage;
+
+		this._hasMoved = false;
 	}
 
 	onTouchEnd() {
+		if (!this.dragging) return;
+		if (!this._hasMoved) {
+			const rot = ((this.rotationMap.get(this.dragging) ?? 0) + 45) % 360;
+			this.rotationMap.set(this.dragging, rot);
+			this.dragging.style.transform = `translate(${this.baseX}px, ${this.baseY}px) rotate(${rot}deg)`;
+		}
 		this.dragging = null;
 	}
 
@@ -175,7 +272,6 @@ class ScrollSyncApp {
 		this.camera.near = -1000;
 		this.camera.far = 1000;
 		this.camera.updateProjectionMatrix();
-		this.layoutBoundaries();
 
 		this.layer.style.height = `${this.canvasHeight}px`;
 
@@ -191,47 +287,6 @@ class ScrollSyncApp {
 		this.camera.updateProjectionMatrix();
 	}
 
-	createBoundaries() {
-		// 左右したの壁と床を作成
-		const material = new THREE.MeshBasicMaterial({
-			color: 0x8b5a2b, // 板っぽい色
-			transparent: true,
-			opacity: 0.9,
-		});
-
-		this.floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
-		this.leftWallMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
-		this.rightWallMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
-
-		this.floorMesh.position.z = -5;
-		this.leftWallMesh.position.z = -5;
-		this.rightWallMesh.position.z = -5;
-
-		this.scene.add(this.floorMesh, this.leftWallMesh, this.rightWallMesh);
-	}
-
-	layoutBoundaries() {
-		if (!this.floorMesh || !this.leftWallMesh || !this.rightWallMesh) return;
-
-		const w = this.viewportWidth;
-		const h = this.canvasHeight;
-
-		const floorH = 24; // 床の厚み
-		const wallW = 24; // 壁の厚み（左右）
-		const wallH = h; // 端から端まで
-
-		// 床（画面下端いっぱい）
-		this.floorMesh.scale.set(w, floorH, 1);
-		this.floorMesh.position.set(0, -h / 2 + floorH / 2, -5);
-
-		// 左右の壁（画面上下いっぱい）
-		this.leftWallMesh.scale.set(wallW, wallH, 1);
-		this.leftWallMesh.position.set(-w / 2 + wallW / 2, 0, -5);
-
-		this.rightWallMesh.scale.set(wallW, wallH, 1);
-		this.rightWallMesh.position.set(w / 2 - wallW / 2, 0, -5);
-	}
-
 	render() {
 		this.items.forEach((item) => item.sync(this.viewportWidth, this.canvasHeight));
 		this.renderer.render(this.scene, this.camera);
@@ -243,9 +298,11 @@ window.addEventListener("DOMContentLoaded", async () => {
 	const layer = document.querySelector("#webgl-layer");
 	const image1 = document.querySelector("#image1 img");
 	const image2 = document.querySelector("#image2 img");
+	const svg1 = document.querySelector(".svg-image1-item");
 	const domImages = [];
 	if (image1) domImages.push(image1);
 	if (image2) domImages.push(image2);
+	if (svg1) domImages.push(svg1);
 
 	if (!layer || domImages.length === 0) return;
 
