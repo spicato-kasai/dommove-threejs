@@ -53,7 +53,7 @@ img {
 .image2 {
 	position: absolute;
 	z-index: 0;
-	top: calc(50vh + 15vw);
+	top: calc(40vh + 15vw);
 	left: 13.227vw;
 	width: 33.07vw;
 	height: 22.05vw;

@@ -1,48 +1,7 @@
 import "./style.css";
 import * as THREE from "three";
-import { Engine, World, Bodies, Body, Common } from "matter-js";
-import decomp from "poly-decomp";
+
 const MAX_DPR = 1.5;
-const FIXED_STEP = 1000 / 60; // 16.67ms
-
-// 画像
-import photoUrl from "./calender_image.jpg";
-
-// JPGをbase64に変換するユーティリティ
-async function toBase64(url) {
-	const res = await fetch(url);
-	const blob = await res.blob();
-	return new Promise((resolve) => {
-		const reader = new FileReader();
-		reader.onload = () => resolve(reader.result); // "data:image/jpeg;base64,..."
-		reader.readAsDataURL(blob);
-	});
-}
-
-/**
- * Converts an SVG path into a polyline-like array of sampled vertex points.
- *
- * The path is sampled from `0` to `getTotalLength()` using a computed interval:
- * `max(minStep, totalLength / maxPoints)`, ensuring no more than roughly
- * `maxPoints` samples while respecting a minimum spacing.
- *
- * @param {SVGPathElement} pathEl - The SVG `<path>` element to sample.
- * @param {number} [minStep=6] - Minimum distance (in path-length units/pixels) between sampled points.
- * @param {number} [maxPoints=60] - Target upper bound for the number of sampled points.
- * @returns {{x: number, y: number}[]} An ordered list of sampled coordinates along the path.
- */
-
-// SVGのパスを等間隔でサンプリングして頂点の配列を生成する関数
-function pathToVertices(pathEl, minStep = 6, maxPoints = 60) {
-	const total = pathEl.getTotalLength();
-	const step = Math.max(minStep, total / maxPoints);
-	const verts = [];
-	for (let i = 0; i <= total; i += step) {
-		const pt = pathEl.getPointAtLength(i);
-		verts.push({ x: pt.x, y: pt.y });
-	}
-	return verts;
-}
 
 class ImageItem {
 	constructor(domImage, scene, textureLoader) {
@@ -50,106 +9,34 @@ class ImageItem {
 		this.mesh = null;
 		this.scene = scene;
 		this.textureLoader = textureLoader;
-		this.body = null;
-		this.isSvg = domImage instanceof SVGSVGElement || domImage.namespaceURI === "http://www.w3.org/2000/svg";
-
-		this.physicsPath = this.isSvg ? domImage.querySelector("[data-physics='1'], path") : null;
 	}
 
-	// ...existing code...
 	async load() {
-		let texture;
-		const isTargetSvg = this.isSvg && this.domImage.classList.contains("svg-image1-item");
-
-		if (isTargetSvg) {
-			// ★ ここを追加：先にbase64に変換する
-			const base64Url = await toBase64(photoUrl);
-
-			const svgClone = this.domImage.cloneNode(true);
-			const svgNS = "http://www.w3.org/2000/svg";
-
-			const vb = svgClone.viewBox?.baseVal;
-			const svgW = vb && vb.width ? vb.width : svgClone.width?.baseVal?.value || this.domImage.clientWidth;
-			const svgH = vb && vb.height ? vb.height : svgClone.height?.baseVal?.value || this.domImage.clientHeight;
-
-			const defs = document.createElementNS(svgNS, "defs");
-			const pattern = document.createElementNS(svgNS, "pattern");
-			pattern.setAttribute("id", "photoPattern");
-			pattern.setAttribute("patternUnits", "userSpaceOnUse");
-			pattern.setAttribute("width", String(svgW));
-			pattern.setAttribute("height", String(svgH));
-
-			const image = document.createElementNS(svgNS, "image");
-			// ★ photoUrl → base64Url に変更
-			image.setAttribute("href", base64Url);
-			image.setAttribute("x", "0");
-			image.setAttribute("y", "0");
-			image.setAttribute("width", String(svgW));
-			image.setAttribute("height", String(svgH));
-			image.setAttribute("preserveAspectRatio", "xMidYMid meet");
-
-			pattern.appendChild(image);
-			defs.appendChild(pattern);
-			svgClone.insertBefore(defs, svgClone.firstChild);
-
-			const path = svgClone.querySelector("path");
-			if (path) path.setAttribute("fill", "url(#photoPattern)");
-
-			const svgText = new XMLSerializer().serializeToString(svgClone);
-			const svgBlob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
-			const svgUrl = URL.createObjectURL(svgBlob);
-
-			try {
-				texture = await new Promise((resolve, reject) => {
-					this.textureLoader.load(svgUrl, resolve, undefined, reject);
-				});
-			} finally {
-				URL.revokeObjectURL(svgUrl);
-			}
-		} else if (this.isSvg) {
-			const svgText = new XMLSerializer().serializeToString(this.domImage);
-			const svgBlob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
-			const svgUrl = URL.createObjectURL(svgBlob);
-
-			try {
-				texture = await new Promise((resolve, reject) => {
-					this.textureLoader.load(svgUrl, resolve, undefined, reject);
-				});
-			} finally {
-				URL.revokeObjectURL(svgUrl);
-			}
-		} else {
-			texture = await new Promise((resolve, reject) => {
-				this.textureLoader.load(this.domImage.currentSrc || this.domImage.src, resolve, undefined, reject);
-			});
-		}
-
+		// 画像をテクスチャとして読み込む
+		const texture = await new Promise((resolve, reject) => {
+			this.textureLoader.load(this.domImage.currentSrc || this.domImage.src, resolve, undefined, reject);
+		});
 		texture.colorSpace = THREE.SRGBColorSpace;
 
+		// ライティングを考慮しないマテリアル
 		const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
 		const geometry = new THREE.PlaneGeometry(1, 1);
 		this.mesh = new THREE.Mesh(geometry, material);
 		this.scene.add(this.mesh);
 	}
-	// ...existing code...
 
 	sync(viewportWidth, canvasHeight) {
 		if (!this.mesh) return;
-		// DOMのサイズと位置を取得
+
+		// getBoundingClientRectで要素の寸法と、そのビューポートに対する相対位置に関する情報を DOMRect オブジェクトで返します。
 		const rect = this.domImage.getBoundingClientRect();
+		const w = rect.width;
+		const h = rect.height;
 
-		// 物理演算中は初期サイズを固定（回転時の外接矩形変化を無視）
-		const w = this.body ? this.baseW : rect.width;
-		const h = this.body ? this.baseH : rect.height;
-
+		// 大きさを渡す
 		this.mesh.scale.set(w, h, 1);
 
-		if (this.body) {
-			this.mesh.position.set(this.body.position.x - viewportWidth / 2, canvasHeight / 2 - this.body.position.y, 0);
-			this.mesh.rotation.z = -this.body.angle;
-			return;
-		}
-
+		// 位置を渡す
 		const centerX = rect.left + w / 2 - viewportWidth / 2;
 		const centerY = canvasHeight / 2 - (rect.top + h / 2);
 		this.mesh.position.set(centerX, centerY, 0);
@@ -161,7 +48,7 @@ class ScrollSyncApp {
 		this.layer = layer;
 
 		this.scene = new THREE.Scene();
-		// 平行投影を表現できるカメラです。
+		// 平行投影を表現できるカメラです。このカメラには遠近感がないので、手前にある3Dオブジェクトも奥にある3Dオブジェクトも同じ大きさで表示されます。
 		this.camera = new THREE.OrthographicCamera();
 		this.renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
 		this.renderer.setClearColor(0x000000, 0);
@@ -176,7 +63,12 @@ class ScrollSyncApp {
 		this.canvasHeight = 0;
 
 		this.render = this.render.bind(this);
-		this.onResize = this._debounce(this.onResize.bind(this), 200);
+		this.onResize = this.onResize.bind(this);
+
+		// 物理演算用の境界メッシュ（床 + 左右壁）
+		this.floorMesh = null;
+		this.leftWallMesh = null;
+		this.rightWallMesh = null;
 
 		// 現在掴んでいる要素
 		this.dragging = null;
@@ -192,20 +84,6 @@ class ScrollSyncApp {
 		this.onTouchStart = this.onTouchStart.bind(this);
 		this.onTouchMove = this.onTouchMove.bind(this);
 		this.onTouchEnd = this.onTouchEnd.bind(this);
-
-		// Matter.jsの物理エンジンの初期化
-		this.engine = Engine.create();
-		Common.setDecomp(decomp);
-		this.engine.gravity.y = 1;
-
-		this._lastTime = 0;
-	}
-	_debounce(fn, ms) {
-		let timer;
-		return (...args) => {
-			clearTimeout(timer);
-			timer = setTimeout(() => fn(...args), ms);
-		};
 	}
 
 	async init() {
@@ -221,12 +99,12 @@ class ScrollSyncApp {
 		this.items.forEach(({ domImage }) => {
 			domImage.style.cursor = "pointer";
 		});
-
+		this.createBoundaries();
 		this.onResize();
 		this.render();
 	}
 	onMouseDown(e) {
-		const clicked = this.items.find(({ domImage }) => domImage === e.target || domImage.contains(e.target));
+		const clicked = this.items.find(({ domImage }) => domImage === e.target);
 		if (!clicked) return;
 
 		e.preventDefault(); // ドラッグ中のテキスト選択などを防止
@@ -255,19 +133,6 @@ class ScrollSyncApp {
 
 		const dx = e.clientX - this.startX;
 		const dy = e.clientY - this.startY;
-
-		const item = this.items.find(({ domImage }) => domImage === this.dragging);
-		if (item?.body) {
-			const tx = this.baseX + dx;
-			const ty = this.baseY + dy;
-			Body.setPosition(item.body, {
-				x: item.baseCenterX + tx,
-				y: item.baseCenterY + ty,
-			});
-			Body.setVelocity(item.body, { x: 0, y: 0 });
-			return;
-		}
-
 		this.dragging.style.transform = `translate(${this.baseX + dx}px, ${this.baseY + dy}px)`;
 	}
 
@@ -278,26 +143,14 @@ class ScrollSyncApp {
 		const touch = e.touches[0];
 		const dx = touch.clientX - this.startX;
 		const dy = touch.clientY - this.startY;
-
-		const item = this.items.find(({ domImage }) => domImage === this.dragging);
-		if (item?.body) {
-			const tx = this.baseX + dx;
-			const ty = this.baseY + dy;
-			Body.setPosition(item.body, {
-				x: item.baseCenterX + tx,
-				y: item.baseCenterY + ty,
-			});
-			Body.setVelocity(item.body, { x: 0, y: 0 });
-			return;
-		}
-
 		this.dragging.style.transform = `translate(${this.baseX + dx}px, ${this.baseY + dy}px)`;
 	}
 
 	onTouchStart(e) {
 		const touch = e.touches[0];
+		// タッチした座標にある要素を取得
 		const target = document.elementFromPoint(touch.clientX, touch.clientY);
-		const clicked = this.items.find(({ domImage }) => domImage === target || domImage.contains(target));
+		const clicked = this.items.find(({ domImage }) => domImage === target);
 		if (!clicked) return;
 
 		e.preventDefault(); // スクロールを抑制
@@ -314,74 +167,15 @@ class ScrollSyncApp {
 		this.dragging = null;
 	}
 
-	setupPhysics() {
-		World.clear(this.engine.world, false);
-
-		this.items.forEach((item) => {
-			const rect = item.domImage.getBoundingClientRect();
-			const w = Math.max(1, rect.width);
-			const h = Math.max(1, rect.height);
-			const x = rect.left + w / 2;
-			const y = rect.top + h / 2;
-
-			item.baseW = w;
-			item.baseH = h;
-			item.baseCenterX = x;
-			item.baseCenterY = y;
-			item.body = null;
-
-			if (item.isSvg) {
-				const path = item.physicsPath;
-				const vb = item.domImage.viewBox?.baseVal;
-
-				if (path && vb && vb.width > 0 && vb.height > 0) {
-					const sx = w / vb.width;
-					const sy = h / vb.height;
-					// SVGをポリゴン化（点の集合体）して物理演算用の頂点列を生成
-					const rawVerts = pathToVertices(path, 6, 80);
-					const verts = rawVerts.map((v) => ({
-						x: (v.x - vb.x) * sx,
-						y: (v.y - vb.y) * sy,
-					}));
-					// 頂点数が少なすぎると物理演算が不安定になるため、ある程度の数が必要
-					if (verts.length >= 3 && verts.length <= 80) {
-						const b = path.getBBox();
-						const cx = (b.x - vb.x + b.width / 2) * sx;
-						const cy = (b.y - vb.y + b.height / 2) * sy;
-
-						const localVerts = verts.map((v) => ({ x: v.x - cx, y: v.y - cy }));
-
-						item.body = Bodies.fromVertices(x + (cx - w / 2), y + (cy - h / 2), [localVerts], { restitution: 0.5, friction: 0.1, frictionAir: 0.01 }, true);
-					}
-				}
-			}
-
-			if (!item.body) {
-				item.body = Bodies.rectangle(x, y, w, h, {
-					restitution: 0.5,
-					friction: 0.1,
-					frictionAir: 0.01,
-				});
-			}
-
-			World.add(this.engine.world, item.body);
-		});
-
-		const t = 120;
-		const vw = this.viewportWidth;
-		const vh = this.canvasHeight;
-		World.add(this.engine.world, [
-			Bodies.rectangle(vw / 2, -t / 2, vw + t * 2, t, { isStatic: true }),
-			Bodies.rectangle(vw / 2, vh + t / 2, vw + t * 2, t, { isStatic: true }),
-			Bodies.rectangle(-t / 2, vh / 2, t, vh + t * 2, { isStatic: true }),
-			Bodies.rectangle(vw + t / 2, vh / 2, t, vh + t * 2, { isStatic: true }),
-		]);
-	}
-
 	onResize() {
 		this.viewportWidth = window.innerWidth;
 		this.viewportHeight = window.innerHeight;
 		this.canvasHeight = this.viewportHeight;
+
+		this.camera.near = -1000;
+		this.camera.far = 1000;
+		this.camera.updateProjectionMatrix();
+		this.layoutBoundaries();
 
 		this.layer.style.height = `${this.canvasHeight}px`;
 
@@ -395,35 +189,53 @@ class ScrollSyncApp {
 		this.camera.near = -1000;
 		this.camera.far = 1000;
 		this.camera.updateProjectionMatrix();
-		// 物理エンジンの設定を更新
-		this.setupPhysics();
 	}
 
-	syncDomFromBody(item) {
-		if (!item.body) return;
-		const dx = item.body.position.x - item.baseCenterX;
-		const dy = item.body.position.y - item.baseCenterY;
-		item.domImage.style.transform = `translate(${dx}px, ${dy}px) rotate(${item.body.angle}rad)`;
-	}
-
-	render(now = 0) {
-		const delta = Math.min(now - this._lastTime, 64); // 最大2フレーム分
-		this._lastTime = now;
-
-		// 余剰時間を積み立て、固定ステップ単位で消化する
-		this._accumulator = (this._accumulator || 0) + delta;
-		while (this._accumulator >= FIXED_STEP) {
-			Engine.update(this.engine, FIXED_STEP);
-			this._accumulator -= FIXED_STEP;
-		}
-
-		this.items.forEach((item) => {
-			item.sync(this.viewportWidth, this.canvasHeight);
-			this.syncDomFromBody(item);
+	createBoundaries() {
+		// 左右したの壁と床を作成
+		const material = new THREE.MeshBasicMaterial({
+			color: 0x8b5a2b, // 板っぽい色
+			transparent: true,
+			opacity: 0.9,
 		});
 
+		this.floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+		this.leftWallMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+		this.rightWallMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+
+		this.floorMesh.position.z = -5;
+		this.leftWallMesh.position.z = -5;
+		this.rightWallMesh.position.z = -5;
+
+		this.scene.add(this.floorMesh, this.leftWallMesh, this.rightWallMesh);
+	}
+
+	layoutBoundaries() {
+		if (!this.floorMesh || !this.leftWallMesh || !this.rightWallMesh) return;
+
+		const w = this.viewportWidth;
+		const h = this.canvasHeight;
+
+		const floorH = 24; // 床の厚み
+		const wallW = 24; // 壁の厚み（左右）
+		const wallH = h; // 端から端まで
+
+		// 床（画面下端いっぱい）
+		this.floorMesh.scale.set(w, floorH, 1);
+		this.floorMesh.position.set(0, -h / 2 + floorH / 2, -5);
+
+		// 左右の壁（画面上下いっぱい）
+		this.leftWallMesh.scale.set(wallW, wallH, 1);
+		this.leftWallMesh.position.set(-w / 2 + wallW / 2, 0, -5);
+
+		this.rightWallMesh.scale.set(wallW, wallH, 1);
+		this.rightWallMesh.position.set(w / 2 - wallW / 2, 0, -5);
+	}
+
+	render() {
+		this.items.forEach((item) => item.sync(this.viewportWidth, this.canvasHeight));
 		this.renderer.render(this.scene, this.camera);
-		requestAnimationFrame((t) => this.render(t));
+		requestAnimationFrame(this.render);
 	}
 }
 
@@ -431,11 +243,9 @@ window.addEventListener("DOMContentLoaded", async () => {
 	const layer = document.querySelector("#webgl-layer");
 	const image1 = document.querySelector("#image1 img");
 	const image2 = document.querySelector("#image2 img");
-	const svg1 = document.querySelector(".svg-image1-item");
 	const domImages = [];
 	if (image1) domImages.push(image1);
 	if (image2) domImages.push(image2);
-	if (svg1) domImages.push(svg1);
 
 	if (!layer || domImages.length === 0) return;
 
