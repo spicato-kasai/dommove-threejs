@@ -9,6 +9,7 @@
 		"preview": "vite preview"
 	},
 	"dependencies": {
+		"@dimforge/rapier2d-compat": "^0.19.3",
 		"@fred3d/ammo": "^1.0.0",
 		"ammo": "^3.0.3",
 		"ammo.js": "^0.0.10",

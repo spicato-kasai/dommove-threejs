@@ -1,4 +1,4 @@
-import RAPIER from "https://cdn.skypack.dev/@dimforge/rapier2d-compat";
+import RAPIER from "@dimforge/rapier2d-compat";
 const SCALE = 100;
 const worldWidth = window.innerWidth / SCALE;
 const worldHeight = window.innerHeight / SCALE;
@@ -20,6 +20,8 @@ function pathToVertices(pathEl, minStep = 6, maxPoints = 60) {
 
 	return verts;
 }
+
+// SVG
 function clean(pts) {
 	const out = [];
 	const EPS = 0.001;
@@ -43,15 +45,16 @@ function clean(pts) {
 }
 
 (async () => {
-	await RAPIER.init();
-
 	const box = document.getElementById("box");
 	const box2 = document.getElementById("box2");
 	const stone1 = document.querySelector(".stone1");
 	const stone2 = document.querySelector(".stone2");
 
 	// ===== 物理ワールド =====
-	const world = new RAPIER.World({ x: 0, y: -9.8 });
+	await RAPIER.init();
+
+	const gravity = { x: 0.0, y: -20 };
+	const world = new RAPIER.World(gravity);
 
 	// ===== 初期位置 =====
 	const rect = box.getBoundingClientRect();
@@ -229,7 +232,6 @@ function clean(pts) {
 		const angle2 = body2.rotation();
 		const x2 = toPixX(pos2.x);
 		const y2 = toPixY(pos2.y);
-		box2.style.transform = `translate(${x2 - rect2.width / 2}px, ${y2 - rect2.height / 2}px) rotate(${-angle2}rad)`;
 		box2.style.transform = `translate(${x2 - rect2.width / 2}px, ${y2 - rect2.height / 2}px) rotate(${-angle2}rad)`;
 
 		// stone1
