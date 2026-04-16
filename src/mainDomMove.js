@@ -48,6 +48,7 @@ function clean(pts) {
 	const box = document.getElementById("box");
 	const box2 = document.getElementById("box2");
 	const stone1 = document.querySelector(".stone1");
+	const stone2 = document.querySelector(".stone2");
 
 	// ===== 物理ワールド =====
 	const world = new RAPIER.World({ x: 0, y: -9.8 });
@@ -62,6 +63,8 @@ function clean(pts) {
 	// stone1はSVGなので、中心を計算してからDOM座標に変換する必要がある
 	const path = stone1.querySelector("path");
 	const vb = stone1.viewBox.baseVal;
+	const path2 = stone2.querySelector("path");
+	const vb2 = stone2.viewBox.baseVal;
 
 	// SVG内の中心
 
@@ -75,14 +78,27 @@ function clean(pts) {
 
 	// viewBox基準で正規化（中心ではなく原点固定）
 	const verts = rawVerts.map(([x, y]) => [(x - vb.x - vb.width / 2) / SCALE, (y - vb.y - vb.height / 2) / SCALE]);
+	// DOM座標へ変換
+	const rect4 = stone2.getBoundingClientRect();
+
+	const cx4 = window.innerWidth / 2;
+	const cy4 = window.innerHeight / 2;
+
+	const rawVerts2 = pathToVertices(path2, 2, 120);
+
+	// viewBox基準で正規化（中心ではなく原点固定）
+	const verts4 = rawVerts2.map(([x, y]) => [(x - vb2.x - vb2.width / 2) / SCALE, (y - vb2.y - vb2.height / 2) / SCALE]);
+
 	// ===== 剛体 =====
 	const body = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(toPhysX(cx), toPhysY(cy)).setLinearDamping(5).setAngularDamping(5).setCcdEnabled(true));
 	const body2 = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(toPhysX(cx2), toPhysY(cy2)).setLinearDamping(5).setAngularDamping(5).setCcdEnabled(true));
 	const body3 = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(toPhysX(cx3), toPhysY(cy3)).setLinearDamping(5).setAngularDamping(5).setCcdEnabled(true));
+	const body4 = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(toPhysX(cx4), toPhysY(cy4)).setLinearDamping(5).setAngularDamping(5).setCcdEnabled(true));
 
 	// ===== コライダー =====
 	world.createCollider(RAPIER.ColliderDesc.cuboid(rect.width / 2 / SCALE, rect.height / 2 / SCALE), body);
 	world.createCollider(RAPIER.ColliderDesc.cuboid(rect2.width / 2 / SCALE, rect2.height / 2 / SCALE), body2);
+	// stone1
 	const cleaned = clean(verts);
 	const flat = cleaned.flat();
 
@@ -91,6 +107,17 @@ function clean(pts) {
 	if (hull) {
 		hull.setDensity(1);
 		world.createCollider(hull, body3);
+	}
+
+	// stone2
+	const cleaned2 = clean(verts4);
+	const flat2 = cleaned2.flat();
+
+	const hull2 = RAPIER.ColliderDesc.convexHull(new Float32Array(flat2));
+
+	if (hull2) {
+		hull2.setDensity(1);
+		world.createCollider(hull2, body4);
 	}
 	// ===== 床 =====
 	const floor = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, -worldHeight / 2));
@@ -109,6 +136,7 @@ function clean(pts) {
 	let dragging = false;
 	let dragging2 = false;
 	let dragging3 = false;
+	let dragging4 = false;
 	box.addEventListener("mousedown", (e) => {
 		dragging = true;
 		body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased);
@@ -121,8 +149,12 @@ function clean(pts) {
 		dragging3 = true;
 		body3.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased);
 	});
+	stone2.addEventListener("mousedown", (e) => {
+		dragging4 = true;
+		body4.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased);
+	});
 	window.addEventListener("mousemove", (e) => {
-		if (!dragging && !dragging2 && !dragging3) return;
+		if (!dragging && !dragging2 && !dragging3 && !dragging4) return;
 
 		const clamp = (val, min, max) => Math.max(min, Math.min(max, val)); // 画面外に出ないようにクランプ
 		const x = clamp(e.clientX, 0, window.innerWidth);
@@ -146,10 +178,16 @@ function clean(pts) {
 				y: toPhysY(y),
 			});
 		}
+		if (dragging4) {
+			body4.setNextKinematicTranslation({
+				x: toPhysX(x),
+				y: toPhysY(y),
+			});
+		}
 	});
 
 	window.addEventListener("mouseup", () => {
-		if (!dragging && !dragging2 && !dragging3) return;
+		if (!dragging && !dragging2 && !dragging3 && !dragging4) return;
 
 		if (dragging) {
 			dragging = false;
@@ -162,6 +200,10 @@ function clean(pts) {
 		if (dragging3) {
 			dragging3 = false;
 			body3.setBodyType(RAPIER.RigidBodyType.Dynamic);
+		}
+		if (dragging4) {
+			dragging4 = false;
+			body4.setBodyType(RAPIER.RigidBodyType.Dynamic);
 		}
 	});
 
@@ -196,6 +238,13 @@ function clean(pts) {
 		const x3 = toPixX(pos3.x);
 		const y3 = toPixY(pos3.y);
 		stone1.style.transform = `translate(${x3 - rect3.width / 2}px, ${y3 - rect3.height / 2}px) rotate(${-angle3}rad)`;
+
+		// stone2
+		const pos4 = body4.translation();
+		const angle4 = body4.rotation();
+		const x4 = toPixX(pos4.x);
+		const y4 = toPixY(pos4.y);
+		stone2.style.transform = `translate(${x4 - rect4.width / 2}px, ${y4 - rect4.height / 2}px) rotate(${-angle4}rad)`;
 
 		requestAnimationFrame(loop);
 	}
