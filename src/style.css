@@ -96,3 +96,13 @@ img {
 	transform-origin: center center;
 	will-change: transform;
 }
+#stone1 {
+	position: absolute;
+	right: 0;
+	width: 272px;
+	height: 247px;
+	background: #95a5a6;
+	border-radius: 50%;
+	transform-origin: center center;
+	will-change: transform;
+}
