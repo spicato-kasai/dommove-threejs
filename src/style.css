@@ -53,7 +53,7 @@ img {
 .image2 {
 	position: absolute;
 	z-index: 0;
-	top: calc(40vh + 15vw);
+	top: calc(10vh + 15vw);
 	left: 13.227vw;
 	width: 33.07vw;
 	height: 22.05vw;
@@ -62,13 +62,37 @@ img {
 .svg-image1 {
 	position: absolute;
 	z-index: 0;
-	top: 29.92vw;
+	top: 19.92vw;
 	left: 13.227vw;
 	width: 18.07vw;
 	height: 16.34vw;
-	/* opacity: 0; */
-	svg {
-		width: 100%;
-		height: 100%;
-	}
+}
+.svg-image1 svg {
+	width: 100%;
+	height: 100%;
+}
+.floor {
+	position: fixed;
+	bottom: 0;
+	left: 0;
+	width: 100%;
+	height: 50px;
+	background: black;
+	z-index: 10;
+}
+#box {
+	position: absolute;
+	width: 120px;
+	height: 120px;
+	background: #3498db;
+	transform-origin: center center;
+	will-change: transform;
+}
+#box2 {
+	position: absolute;
+	width: 120px;
+	height: 120px;
+	background: #e74c3c;
+	transform-origin: center center;
+	will-change: transform;
 }
