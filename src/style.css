@@ -76,7 +76,7 @@ img {
 	bottom: 0;
 	left: 0;
 	width: 100%;
-	height: 50px;
+	height: 20px;
 	background: black;
 	z-index: 10;
 }
@@ -96,13 +96,17 @@ img {
 	transform-origin: center center;
 	will-change: transform;
 }
-#stone1 {
+.stone1 {
 	position: absolute;
-	right: 0;
 	width: 272px;
 	height: 247px;
-	background: #95a5a6;
-	border-radius: 50%;
+	transform-origin: center center;
+	will-change: transform;
+}
+.stone2 {
+	position: absolute;
+	width: 272px;
+	height: 247px;
 	transform-origin: center center;
 	will-change: transform;
 }

@@ -1,5 +1,4 @@
 import RAPIER from "https://cdn.skypack.dev/@dimforge/rapier2d-compat";
-import decomp from "poly-decomp";
 const SCALE = 100;
 const worldWidth = window.innerWidth / SCALE;
 const worldHeight = window.innerHeight / SCALE;
@@ -13,11 +12,34 @@ function pathToVertices(pathEl, minStep = 6, maxPoints = 60) {
 	const total = pathEl.getTotalLength();
 	const step = Math.max(minStep, total / maxPoints);
 	const verts = [];
+
 	for (let i = 0; i <= total; i += step) {
 		const pt = pathEl.getPointAtLength(i);
 		verts.push([pt.x, pt.y]);
 	}
+
 	return verts;
+}
+function clean(pts) {
+	const out = [];
+	const EPS = 0.001;
+
+	for (const p of pts) {
+		const x = p[0],
+			y = p[1];
+		if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+		const last = out[out.length - 1];
+		if (last) {
+			const dx = last[0] - x;
+			const dy = last[1] - y;
+			if (dx * dx + dy * dy < EPS * EPS) continue;
+		}
+
+		out.push([x, y]);
+	}
+
+	return out;
 }
 
 (async () => {
@@ -37,17 +59,22 @@ function pathToVertices(pathEl, minStep = 6, maxPoints = 60) {
 	const rect2 = box2.getBoundingClientRect();
 	const cx2 = rect2.left + rect2.width / 2;
 	const cy2 = rect2.top + rect2.height / 2;
-	const rect3 = stone1.getBoundingClientRect();
-	const cx3 = rect3.left + rect3.width / 2;
-	const cy3 = rect3.top + rect3.height / 2;
+	// stone1はSVGなので、中心を計算してからDOM座標に変換する必要がある
 	const path = stone1.querySelector("path");
 	const vb = stone1.viewBox.baseVal;
-	const sx = rect3.width / vb.width;
-	const sy = rect3.height / vb.height;
-	const rawVerts = pathToVertices(path, 6, 60);
-	// SVG座標→物理座標へ変換
-	const verts = rawVerts.map(([x, y]) => [((x - vb.x) * sx) / SCALE, ((y - vb.y) * sy) / SCALE]);
 
+	// SVG内の中心
+
+	// DOM座標へ変換
+	const rect3 = stone1.getBoundingClientRect();
+
+	const cx3 = window.innerWidth / 2;
+	const cy3 = window.innerHeight / 2;
+
+	const rawVerts = pathToVertices(path, 2, 120);
+
+	// viewBox基準で正規化（中心ではなく原点固定）
+	const verts = rawVerts.map(([x, y]) => [(x - vb.x - vb.width / 2) / SCALE, (y - vb.y - vb.height / 2) / SCALE]);
 	// ===== 剛体 =====
 	const body = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(toPhysX(cx), toPhysY(cy)).setLinearDamping(5).setAngularDamping(5).setCcdEnabled(true));
 	const body2 = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(toPhysX(cx2), toPhysY(cy2)).setLinearDamping(5).setAngularDamping(5).setCcdEnabled(true));
@@ -56,8 +83,15 @@ function pathToVertices(pathEl, minStep = 6, maxPoints = 60) {
 	// ===== コライダー =====
 	world.createCollider(RAPIER.ColliderDesc.cuboid(rect.width / 2 / SCALE, rect.height / 2 / SCALE), body);
 	world.createCollider(RAPIER.ColliderDesc.cuboid(rect2.width / 2 / SCALE, rect2.height / 2 / SCALE), body2);
-	world.createCollider(RAPIER.ColliderDesc.cuboid(rect3.width / 2 / SCALE, rect3.height / 2 / SCALE), body3);
+	const cleaned = clean(verts);
+	const flat = cleaned.flat();
 
+	const hull = RAPIER.ColliderDesc.convexHull(new Float32Array(flat));
+
+	if (hull) {
+		hull.setDensity(1);
+		world.createCollider(hull, body3);
+	}
 	// ===== 床 =====
 	const floor = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, -worldHeight / 2));
 	world.createCollider(RAPIER.ColliderDesc.cuboid(worldWidth, 0.2), floor);
@@ -83,25 +117,39 @@ function pathToVertices(pathEl, minStep = 6, maxPoints = 60) {
 		dragging2 = true;
 		body2.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased);
 	});
+	stone1.addEventListener("mousedown", (e) => {
+		dragging3 = true;
+		body3.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased);
+	});
 	window.addEventListener("mousemove", (e) => {
-		if (!dragging && !dragging2) return;
+		if (!dragging && !dragging2 && !dragging3) return;
+
+		const clamp = (val, min, max) => Math.max(min, Math.min(max, val)); // 画面外に出ないようにクランプ
+		const x = clamp(e.clientX, 0, window.innerWidth);
+		const y = clamp(e.clientY, 0, window.innerHeight);
 
 		if (dragging) {
 			body.setNextKinematicTranslation({
-				x: toPhysX(e.clientX),
-				y: toPhysY(e.clientY),
+				x: toPhysX(x),
+				y: toPhysY(y),
 			});
 		}
 		if (dragging2) {
 			body2.setNextKinematicTranslation({
-				x: toPhysX(e.clientX),
-				y: toPhysY(e.clientY),
+				x: toPhysX(x),
+				y: toPhysY(y),
+			});
+		}
+		if (dragging3) {
+			body3.setNextKinematicTranslation({
+				x: toPhysX(x),
+				y: toPhysY(y),
 			});
 		}
 	});
 
 	window.addEventListener("mouseup", () => {
-		if (!dragging && !dragging2) return;
+		if (!dragging && !dragging2 && !dragging3) return;
 
 		if (dragging) {
 			dragging = false;
@@ -110,6 +158,10 @@ function pathToVertices(pathEl, minStep = 6, maxPoints = 60) {
 		if (dragging2) {
 			dragging2 = false;
 			body2.setBodyType(RAPIER.RigidBodyType.Dynamic);
+		}
+		if (dragging3) {
+			dragging3 = false;
+			body3.setBodyType(RAPIER.RigidBodyType.Dynamic);
 		}
 	});
 
